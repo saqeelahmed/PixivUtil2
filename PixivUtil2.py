@@ -35,10 +35,10 @@ from PixivDBManager import PixivDBManager
 from PixivException import PixivException
 from PixivTags import PixivTags
 
-colorama.init()
+colorama.init()   
 DEBUG_SKIP_PROCESS_IMAGE = False
 DEBUG_SKIP_DOWNLOAD_IMAGE = False
-
+###############################################################################
 if platform.system() == "Windows":
     # patch getpass.getpass() for windows to show '*'
     def win_getpass_with_mask(prompt='Password: ', stream=None):
@@ -102,8 +102,34 @@ def header():
     print("│ " + Fore.YELLOW + Back.BLACK + Style.BRIGHT + f"Donate at {Fore.CYAN}{Style.BRIGHT}{PixivConstant.PIXIVUTIL_DONATE}".ljust(PADDING + 6, " ") + Style.RESET_ALL + "│")
     print("└" + "".ljust(PADDING - 2, "─") + "┘")
 
-
+############################### Simplified functions#######################################
 def get_start_and_end_page_from_options(options):
+    """Parse start and end page values from options, with fallback logic."""
+    try:
+        page_num = int(options.start_page) if options.start_page is not None else 1
+        print(f"Start Page = {page_num}")
+    except Exception:
+        raise ValueError(f"Invalid start page number: {options.start_page}")
+
+    try:
+        if options.end_page is not None:
+            end_page_num = int(options.end_page)
+        elif options.number_of_pages is not None:
+            end_page_num = int(options.number_of_pages)
+        else:
+            end_page_num = __config__.numberOfPage
+        print(f"End Page = {end_page_num}")
+    except Exception:
+        raise ValueError(f"Invalid end page number: {options.end_page}")
+
+    if page_num > end_page_num and end_page_num != 0:
+        print(f"Start Page ({page_num}) is bigger than End Page ({end_page_num}), assuming as page count.")
+        end_page_num = page_num + end_page_num
+
+    return page_num, end_page_num
+################################ End of simplified functions######################################
+
+"""def get_start_and_end_page_from_options(options):
     ''' Try to parse start and end page from options.'''
     page_num = 1
     if options.start_page is not None:
@@ -131,10 +157,10 @@ def get_start_and_end_page_from_options(options):
         print(f"Start Page ({page_num}) is bigger than End Page ({end_page_num}), assuming as page count ({page_num + end_page_num}).")
         end_page_num = page_num + end_page_num
 
-    return page_num, end_page_num
+    return page_num, end_page_num"""
 
 
-def get_list_file_from_options(options, default_list_file):
+"""def get_list_file_from_options(options, default_list_file):
     list_file_name = default_list_file
     if options.list_file is not None:
         if os.path.isabs(options.list_file):
@@ -147,8 +173,25 @@ def get_list_file_from_options(options, default_list_file):
         else:
             PixivHelper.print_and_log("warn", f"The given list file [{test_file_name}] doesn't exists, using default list file [{list_file_name}].")
 
-    return list_file_name
-
+    return list_file_name"""
+###########################simplified functions######################################
+def get_list_file_from_options(options, default_list_file):
+    """Determine which list file to use, falling back to default if necessary."""
+    list_file = options.list_file
+    if list_file:
+        path = (
+            list_file if os.path.isabs(list_file)
+            else os.path.join(__config__.downloadListDirectory, list_file)
+        )
+        path = os.path.abspath(path)
+        if os.path.exists(path):
+            return path
+        PixivHelper.print_and_log(
+            "warn",
+            f"The given list file [{path}] doesn't exist, using default list file [{default_list_file}]."
+        )
+    return default_list_file
+############################end simplified functions######################################
 
 def menu():
     PADDING = 60
@@ -204,7 +247,7 @@ def menu():
     return sel
 
 
-def menu_download_by_member_id(opisvalid, args, options):
+"""def menu_download_by_member_id(opisvalid, args, options):
     __log__.info('Member id mode (1).')
     current_member = 1
     page = 1
@@ -269,8 +312,56 @@ def menu_download_by_member_id(opisvalid, args, options):
             PixivHelper.print_and_log('error', f"Member ID: {member_id} is not valid")
             global ERROR_CODE
             ERROR_CODE = -1
-            continue
+            continue"""
 
+
+
+############################simplified function######################
+def menu_download_by_member_id(opisvalid, args, options):
+    __log__.info('Member id mode (1).')
+    page, end_page = 1, 0
+    include_sketch = False
+
+    if opisvalid and args:
+        include_sketch = options.include_sketch
+        if include_sketch:
+            print("Including Pixiv Sketch.")
+        page, end_page = get_start_and_end_page_from_options(options)
+        member_ids = [int(mid) for mid in args if mid.isdigit()]
+        for mid in args:
+            if not mid.isdigit():
+                print(f"Possible invalid member id = {mid}")
+    else:
+        raw_input = input('Member ids: ').strip()
+        page, end_page = PixivHelper.get_start_and_end_number(total_number_of_page=options.number_of_pages)
+        default_sketch = __config__.defaultSketchOption.lower()
+
+        if default_sketch == 'y':
+            print("Including Pixiv Sketch.")
+            include_sketch = True
+        elif default_sketch == 'n':
+            print("Excluding Pixiv Sketch.")
+        else:
+            include_sketch = (input('Include Pixiv Sketch [y/n, default is no]? ').strip().lower() or 'n') == 'y'
+
+        member_ids = PixivHelper.get_ids_from_csv(raw_input)
+        PixivHelper.print_and_log('info', f"Member IDs: {member_ids}")
+
+    for index, member_id in enumerate(member_ids, start=1):
+        try:
+            prefix = f"[{index} of {len(member_ids)}] "
+            PixivArtistHandler.process_member(sys.modules[__name__], __config__, member_id, page, end_page, prefix)
+
+            if include_sketch:
+                artist_model, _ = __br__.getMemberPage(member_id)
+                sketch_prefix = f"[{index} ({artist_model.artistToken}) of {len(member_ids)}] "
+                PixivSketchHandler.process_sketch_artists(sys.modules[__name__], __config__, artist_model.artistToken, page, end_page, sketch_prefix)
+
+        except PixivException:
+            PixivHelper.print_and_log('error', f"Member ID: {member_id} is not valid")
+            global ERROR_CODE
+            ERROR_CODE = -1
+############################end of simplified functions##############################
 
 def menu_download_by_member_bookmark(opisvalid, args, options):
     __log__.info('Member Bookmark mode (11).')
